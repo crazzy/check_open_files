@@ -3,6 +3,6 @@ Simple Nagios/OP5 plugin which checks the amount of filehandles used vs the limi
 For now only works on Linux, could be fixed but would require:
   * Checking uname() result for OS
   * Checking different sysctl's for different OS's and perhaps other places for OS's that doesn't use sysctl
-  * Figuring out the alternative for Linux prlimit() for those OS's
+  * Figuring out the alternative for Linux /proc to find limits and number of fd's
 
 No docs, read the code.

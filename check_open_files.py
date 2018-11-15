@@ -6,20 +6,8 @@
 #
 
 from argparse import ArgumentParser
-from ctypes import CDLL, c_int32, c_ulong, c_void_p, Structure, POINTER, byref
-from ctypes.util import find_library
 from os import listdir
-from psutil import pids
-from resource import RLIMIT_NOFILE
 from sys import exit
-
-libc = CDLL(find_library("c"))
-pid_t = c_int32
-rlim_t = c_ulong
-
-
-class rlimit(Structure):
-    _fields_ = [('rlim_cur', rlim_t), ('rlim_max', rlim_t)]
 
 
 # Nagios states
@@ -58,6 +46,31 @@ def lsof(pid):
         return 0
 
 
+def getlimit(pid):
+    try:
+        with open('/proc/{}/limits'.format(pid)) as f:
+            content = f.readlines()
+    except (IOError, OSError):
+        return None
+    for line in content:
+        line = line.strip()
+        if 'Max open files' in line:
+            return line.split()[3]
+    return None
+
+
+def getpids():
+    fds = listdir('/proc')
+    ret = []
+    for fd in fds:
+        try:
+            int(fd)
+        except ValueError:
+            continue
+        ret.append(fd)
+    return ret
+
+
 # Getting system-wide limits
 with open('/proc/sys/fs/file-nr') as f:
     (kern_openf, temp, kern_maxf) = f.read().rstrip().split("\t")
@@ -70,13 +83,13 @@ if pc >= args.c:
 
 
 # Getting per pid limits
-for pid in pids():
-    pid_rlim = rlimit()
-    libc.prlimit.argtypes = [pid_t, c_int32, c_void_p, POINTER(rlimit)]
-    libc.prlimit(pid, RLIMIT_NOFILE, None, byref(pid_rlim))
+for pid in getpids():
+    pid_limit = getlimit(pid)
+    if not pid_limit:  # Pid died during check execution
+        continue
     numf = lsof(pid)
     try:
-        pc = round(float(numf) / float(pid_rlim.rlim_cur) * 100, 2)
+        pc = round(float(numf) / float(pid_limit) * 100, 2)
     except ZeroDivisionError:
         pc = 0
     if pc >= args.w:
@@ -89,11 +102,11 @@ for pid in pids():
             comm = "Unknown"
     if pc >= args.c:
         status = STATE_CRIT
-        status_list.append("PID {}({}) open files reached {}% of max ({})".format(pid, comm, pc, pid_rlim.rlim_cur))
+        status_list.append("PID {}({}) open files reached {}% of max ({})".format(pid, comm, pc, pid_limit))
     elif pc >= args.w:
         if status != STATE_CRIT:
             status = STATE_WARN
-        status_list.append("PID {}({}) open files reached {}% of max ({})".format(pid, comm, pc, pid_rlim.rlim_cur))
+        status_list.append("PID {}({}) open files reached {}% of max ({})".format(pid, comm, pc, pid_limit))
 
 
 # Exiting with proper status and message
